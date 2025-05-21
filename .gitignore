@@ -1,0 +1,26 @@
+# Terraform generated files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.tfstate.lock.info
+
+# Sensitive variables (example - adjust based on your file names)
+# If you have a file like 'secrets.tfvars', list it here:
+# secrets.tfvars
+# *.tfvars # Use this if ALL .tfvars files should be ignored (less common)
+# *.tfvars.json
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Local CLI configuration (if present)
+.terraformrc
+terraform.rc
