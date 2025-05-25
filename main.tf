@@ -13,7 +13,7 @@ provider "aws" {
   profile = "terraform"
 }
 
-#Network
+#vpc
 module "vpc" {
   source = "terraform-aws-modules/vpc/aws"
 
@@ -32,8 +32,6 @@ module "vpc" {
     Environment = "dev"
   }
 }
-
-
 
 #Role
 resource "aws_iam_role" "ssm_instance_role" {
@@ -67,7 +65,7 @@ resource "aws_iam_instance_profile" "ssm_instance_profile" {
   role = aws_iam_role.ssm_instance_role.name
 }
 
-#EC2 Instances
+#ec2 instances
 resource "aws_instance" "web-server" {
   count = 2
 
@@ -113,12 +111,12 @@ resource "aws_vpc_security_group_egress_rule" "allow_endpoints_https_out" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "allow_http" {
-  security_group_id = aws_security_group.ec2_ssm_sg.id
-  from_port         = 80
-  to_port           = 80
-  ip_protocol       = "tcp"
-  cidr_ipv4         = module.vpc.vpc_cidr_block
-  description       = "Allows HTTP from within VPC for web server"
+  security_group_id            = aws_security_group.ec2_ssm_sg.id
+  from_port                    = 80
+  to_port                      = 80
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.clb_sg.id
+  description                  = "Allows HTTP from CLB for web server"
 }
 
 resource "aws_vpc_security_group_ingress_rule" "allow_ec2sg_in" {
@@ -155,7 +153,34 @@ resource "aws_vpc_security_group_ingress_rule" "allow_https_ec2_in" {
   description                  = "Allow HTTPS from EC2 instances for SSM"
 }
 
-#SSM Endpoints
+#clb sg
+resource "aws_security_group" "clb_sg" {
+  name        = "clb-sg"
+  description = "Security group for CLB allowing HTTP traffic"
+  vpc_id      = module.vpc.vpc_id
+
+  tags = {
+    Name = "CLB-SG"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_external_http_in" {
+  security_group_id = aws_security_group.clb_sg.id
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+  cidr_ipv4         = "0.0.0.0/0"
+  description       = "Allow HTTP from internet"
+}
+
+resource "aws_vpc_security_group_egress_rule" "allow_all_ec2_out" {
+  security_group_id            = aws_security_group.clb_sg.id
+  ip_protocol                  = "-1"
+  referenced_security_group_id = aws_security_group.ec2_ssm_sg.id
+  description                  = "Allow all egress to EC2 instances"
+}
+
+#ssm endpoints
 resource "aws_vpc_endpoint" "ssm_endpoint" {
   vpc_id              = module.vpc.vpc_id
   subnet_ids          = module.vpc.private_subnets
@@ -193,4 +218,42 @@ resource "aws_vpc_endpoint" "ec2messages_endpoint" {
   tags = {
     Name = "ec2messages-endpoint"
   }
+}
+
+#classic load balancer
+resource "aws_elb" "web_lb" {
+  name            = "web-lb"
+  subnets         = module.vpc.public_subnets
+  security_groups = [aws_security_group.clb_sg.id]
+  instances       = aws_instance.web-server[*].id
+
+  listener {
+    instance_port     = 80
+    instance_protocol = "HTTP"
+    lb_port           = 80
+    lb_protocol       = "HTTP"
+  }
+
+  health_check {
+
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 3
+    target              = "HTTP:80/"
+    interval            = 30
+  }
+
+  cross_zone_load_balancing   = true
+  idle_timeout                = 60
+  connection_draining         = true
+  connection_draining_timeout = 300
+
+  tags = {
+    Name = "Web-Classic-LB"
+  }
+}
+
+output "clb_dns_name" {
+  description = "The DNS name of the CLB"
+  value       = aws_elb.web_lb.dns_name
 }
